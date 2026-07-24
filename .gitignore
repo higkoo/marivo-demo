@@ -1,0 +1,62 @@
+# Marivo and local runtime state
+.marivo/
+.cache/
+.venv/
+.env
+.env.*
+!.env.example
+.direnv/
+
+# Agent-local state
+.agents/
+.claude/
+.codex/
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Test, type-check, lint, and coverage artifacts
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# Notebook and editor runtime state
+.ipynb_checkpoints/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs, process state, and temporary files
+*.log
+*.pid
+*.pid.lock
+*.tmp
+*.temp
+*.bak
+tmp/
+temp/
+.tmp/
+.temp/
+
+# Operating-system metadata
+.DS_Store
+
+# Generated local data
+data/raw/
+data/warehouse.duckdb
+data/warehouse.duckdb.*
+data/download-manifest.json

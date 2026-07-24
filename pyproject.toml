@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=78", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "marivo-yellow-taxi-demo"
+version = "0.1.0"
+description = "Agent-ready Marivo demo over NYC TLC Yellow Taxi data."
+requires-python = ">=3.12"
+dependencies = [
+  "duckdb>=1.4,<2",
+  "marivo[all]>=0.3.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.15,<2",
+  "pandas-stubs>=2.2,<3",
+  "pytest>=8.3,<9",
+  "ruff>=0.11,<1",
+]
+
+[tool.setuptools.packages.find]
+include = ["yellow_taxi_demo*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["yellow_taxi_demo"]
+
+[[tool.mypy.overrides]]
+module = ["marivo", "marivo.*"]
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

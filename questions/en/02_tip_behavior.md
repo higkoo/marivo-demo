@@ -1,9 +1,11 @@
 # Where did recorded tip rate change?
 
-Analyze the change in `mobility.credit_card_tip_rate` between the first and
-second halves of 2025. Compare it with `mobility.credit_card_trip_share` and
-the broader `mobility.tip_rate`, but do not interpret cash zeros as rider
-behavior because cash tips are generally absent from the source.
+Compare the first and second halves of 2025. How did recorded credit-card tips
+as a share of credit-card metered fares change? Compare that result with the
+share of trips paid by credit card and with recorded tips as a share of all
+metered fares.
 
-Identify interesting pickup zones and rate codes, check whether the result is
-stable over weekly buckets, and state the denominator used.
+Identify the pickup zones and rate categories with the largest changes, check
+whether the pattern remains visible in weekly results, and state the denominator
+used for every rate. Do not interpret zero cash tips as rider behavior because
+cash tips are generally absent from the source.

@@ -1,12 +1,12 @@
 # Which demand anomalies deserve investigation?
 
-Observe daily `mobility.trip_count` during 2025 and discover unusual points,
-period shifts, interesting windows, and cross-sectional pickup-zone outliers.
+Review the daily number of published Yellow Taxi trips during 2025. Find unusual
+dates, sustained shifts, noteworthy time windows, and pickup zones whose
+patterns differ sharply from other zones.
 
-Check source-month coverage, `mobility.implausible_record_rate`,
-`mobility.pickup_time_mismatch_rate`,
-`mobility.nonpositive_duration_record_rate`,
-`mobility.nonpositive_distance_record_rate`, and
-`mobility.negative_fare_record_rate` before reporting anomalies. Determine
-which quality reason drives each suspicious segment and separate
-published-record anomalies from real-world demand events.
+Before treating a pattern as a change in real-world demand, check for missing
+source months, pickup timestamps that disagree with the source-file month,
+nonpositive trip durations or distances, negative fares, and other implausible
+records. For each suspicious period or zone, identify the data-quality issue
+that could explain it and distinguish published-record anomalies from possible
+real-world demand events.

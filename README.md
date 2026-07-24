@@ -35,10 +35,11 @@ complete files and rebuilds only when requested.
 
 After setup, open this repository in a coding agent and ask:
 
-> Use the Marivo semantic and analysis interfaces in this project. Compare
-> December 2025 with January 2025, determine which pickup boroughs contributed
-> most to the change in fare revenue, inspect data quality before drawing
-> conclusions, and preserve the analysis in a named Marivo session.
+> Compare December 2025 with January 2025. How much did metered fare revenue
+> change, and which pickup boroughs, pickup zones, payment methods, and rate
+> categories accounted for most of the difference? Check data completeness and
+> unusual records before drawing conclusions, distinguish metered fares from
+> total passenger charges, and do not make causal claims.
 
 More prompts live under [`questions/en/`](questions/en/). A Chinese version is
 available under [`questions/zh-CN/`](questions/zh-CN/).

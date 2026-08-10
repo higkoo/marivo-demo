@@ -415,10 +415,11 @@ ORDER BY 1 DESC
 "
 
 # 对比一下：原始 Parquet vs 仓库视图
-duckdb -c "
-SELECT count(*) AS raw_rows FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet')
+# 注意：因为要读 yellow_trips 视图，必须先连上 warehouse.duckdb
+duckdb data/warehouse.duckdb -c "
+SELECT 'raw' AS src, count(*) FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet')
 UNION ALL
-SELECT count(*) FROM yellow_trips
+SELECT 'warehouse', count(*) FROM yellow_trips
 "
 # 结果应该一致——仓库视图不增不减，只是加了便捷列
 ```

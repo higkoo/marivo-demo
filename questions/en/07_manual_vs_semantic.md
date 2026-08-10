@@ -419,7 +419,8 @@ ORDER BY 1 DESC
 "
 
 # Raw Parquet row count vs warehouse view — should match exactly
-duckdb -c "
+# Note: we must connect to warehouse.duckdb because yellow_trips lives there
+duckdb data/warehouse.duckdb -c "
 SELECT 'raw' AS source, count(*) FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet')
 UNION ALL
 SELECT 'warehouse', count(*) FROM yellow_trips

@@ -1,6 +1,9 @@
 # Marivo NYC Yellow Taxi Demo
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [简体中文（小白入门推荐）](README.zh-CN.md)
+
+> New here? The [beginner-friendly Chinese guide](README.zh-CN.md) walks through
+> what this project is, why to use it, and how to run it step by step.
 
 A clone-and-analyze Marivo project backed by one complete year of official NYC
 TLC Yellow Taxi trip records.

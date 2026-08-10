@@ -1,4 +1,8 @@
-# Analysis questions / 分析问题
+# 分析问题 / Analysis questions
 
-- [English](en/)
-- [中文](zh-CN/)
+这里有 6 个循序渐进的分析问题，每个都配有背景说明和小白提示，建议按 01→06 顺序做。
+
+- **中文（推荐入门）**：[zh-CN/](zh-CN/)
+- English：[en/](en/)
+
+中文版每个问题包含：你能学到什么、背景小知识、可直接复制给 Agent 的提问、小白提示。

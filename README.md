@@ -142,7 +142,16 @@ make data-verify
 > 上车区域、支付方式和费率类别对差异贡献最大？在得出结论前检查数据完整性和
 > 异常记录，区分计价器车费与乘客支付总额，并且不要作因果推断。
 
-更多循序渐进的问题在 [`questions/zh-CN/`](questions/zh-CN/)，建议按 01→06 顺序看。
+下面是 6 个循序渐进的示例问题，建议按 01→06 顺序做（详情点击展开）：
+
+1. [车费收入为什么发生了变化？](questions/zh-CN/01_revenue_change.md)
+2. [记录的小费率在哪里发生了变化？](questions/zh-CN/02_tip_behavior.md)
+3. [哪些需求异常值得进一步调查？](questions/zh-CN/03_demand_anomalies.md)
+4. [预测近期 Yellow Taxi 需求](questions/zh-CN/04_forecast.md)
+5. [哪些起讫路线最为重要？](questions/zh-CN/05_od_routes.md)
+6. [乘客支付金额的构成发生了什么变化？](questions/zh-CN/06_fare_components.md)
+
+每个问题都配有背景小知识和小白提示，建议逐个完成。英文版见 [`questions/en/`](questions/en/)。
 
 ### 第 5 步：看懂结果
 

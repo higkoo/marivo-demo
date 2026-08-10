@@ -17,167 +17,168 @@
 │   │   ├── ... （01–12，共 12 个）
 │   │   └── taxi_zone_lookup.csv              ← 区域对照表
 │   └── warehouse.duckdb                      ← make setup 后自动构建
-├── .venv/bin/python                          ← 自带 duckdb 库
 └── ...
 ```
 
-如果你已经跑过 `make setup`，那这些文件**应该已经存在了**。
-如果没有，先跑一遍：
+先跑 `make setup` 把数据下好（约 750 MB，几分钟）：
 
 ```bash
 make setup
 ```
 
-它会自动下载全部 12 个 Parquet 文件 + 区域表到 `data/raw/`，
-并构建 `data/warehouse.duckdb`。这个过程需要几分钟（总共约 750 MB）。
+---
+
+### 前置：装 DuckDB CLI（一次性）
+
+DuckDB 官方提供预编译的命令行二进制，一行命令就能用：
+
+```bash
+wget https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip
+unzip duckdb_cli-linux-amd64.zip
+chmod +x duckdb
+sudo mv duckdb /usr/local/bin/
+```
+
+验证：
+
+```bash
+duckdb --version   # v1.5.5 (Variegata)
+```
+
+不需要 Python、不需要 pip、不需要 `.venv`——**纯 Shell 零依赖**。
 
 ---
 
-### 路线 A：纯 Shell 一行命令（推荐先做）
+### 路线 A：纯 Shell + DuckDB CLI（推荐先做）
 
-**前提**：已经 `make setup`。项目自带的 `.venv/bin/python` 里装了 DuckDB，
-不需要额外装任何东西。
+所有查询都在项目根目录下执行，直接用 `duckdb -c "SQL"`。
 
-#### 查看 Parquet schema
+#### 1. 看 Parquet 里有哪些列
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"SELECT name, type FROM parquet_schema('data/raw/yellow_tripdata_2025-01.parquet') WHERE name <> 'schema'\").show()
+duckdb -c "
+SELECT name, type
+FROM parquet_schema('data/raw/yellow_tripdata_2025-01.parquet')
+WHERE name <> 'schema'
+ORDER BY name
 "
 ```
 
-#### 看行数
+#### 2. 看行数
 
 ```bash
-.venv/bin/python -c "
-import duckdb; print(duckdb.sql(\"SELECT count(*) FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')\").fetchone()[0])
+duckdb -c "
+SELECT count(*) AS trips
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
 "
 ```
 
-#### 看前 5 行关键字段
+#### 3. 看前 5 行关键字段
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT tpep_pickup_datetime AS pickup,
-         trip_distance, fare_amount, tip_amount, total_amount,
-         payment_type, PULocationID, DOLocationID
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
-  LIMIT 5
-\"\"\").show()
+duckdb -c "
+SELECT tpep_pickup_datetime AS pickup,
+       trip_distance, fare_amount, tip_amount, total_amount,
+       payment_type, PULocationID, DOLocationID
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
+LIMIT 5
 "
 ```
 
-#### 基础汇总（行程数、车费、小费率）
+#### 4. 基础汇总（行程数、车费、小费率）
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT count(*) AS trips,
-         round(sum(fare_amount), 2) AS total_fare,
-         round(sum(tip_amount), 2) AS total_tips,
-         round(sum(tip_amount)/nullif(sum(fare_amount), 0), 4) AS tip_rate
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
-  WHERE trip_distance > 0 AND total_amount >= 0
-\"\"\").show()
+duckdb -c "
+SELECT
+  count(*) AS trips,
+  round(sum(fare_amount), 2) AS total_fare,
+  round(sum(tip_amount), 2) AS total_tips,
+  round(sum(tip_amount) / nullif(sum(fare_amount), 0), 4) AS tip_rate
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
+WHERE trip_distance > 0 AND total_amount >= 0
 "
 ```
 
-#### 按小时看打车热度
+#### 5. 按小时看打车热度
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT extract(hour FROM tpep_pickup_datetime) AS hour,
-         count(*) AS trips
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
-  GROUP BY 1 ORDER BY 1
-\"\"\").show()
+duckdb -c "
+SELECT extract(hour FROM tpep_pickup_datetime) AS hour,
+       count(*) AS trips
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
+GROUP BY 1 ORDER BY 1
 "
 ```
 
-#### 按支付方式看差异
+#### 6. 按支付方式看差异
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT payment_type,
-         count(*) AS trips,
-         round(avg(fare_amount), 2) AS avg_fare,
-         round(avg(tip_amount), 2) AS avg_tip
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
-  GROUP BY 1 ORDER BY 2 DESC
-\"\"\").show()
+duckdb -c "
+SELECT payment_type,
+       count(*) AS trips,
+       round(avg(fare_amount), 2) AS avg_fare,
+       round(avg(tip_amount), 2) AS avg_tip
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
+GROUP BY 1 ORDER BY 2 DESC
 "
 ```
 
-#### 关联区域表，看哪个行政区最多
+#### 7. 关联区域表，看哪个行政区最多
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT z.Borough AS pickup_borough,
-         count(*) AS trips,
-         round(sum(t.total_amount), 0) AS revenue
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet') t
-  LEFT JOIN read_csv_auto('data/raw/taxi_zone_lookup.csv', header=true) z
-    ON t.PULocationID = z.LocationID
-  GROUP BY 1 ORDER BY 2 DESC LIMIT 5
-\"\"\").show()
+duckdb -c "
+SELECT z.Borough AS pickup_borough,
+       count(*) AS trips,
+       round(sum(t.total_amount), 0) AS revenue
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet') t
+LEFT JOIN read_csv_auto('data/raw/taxi_zone_lookup.csv', header=true) z
+  ON t.PULocationID = z.LocationID
+GROUP BY 1 ORDER BY 2 DESC LIMIT 5
 "
 ```
 
-#### 数据质量巡检
+#### 8. 数据质量巡检
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT
-    count(*) FILTER (WHERE fare_amount < 0) AS neg_fare,
-    count(*) FILTER (WHERE trip_distance = 0) AS zero_mi,
-    count(*) FILTER (WHERE passenger_count IS NULL) AS null_pax,
-    count(*) FILTER (WHERE tpep_dropoff_datetime <= tpep_pickup_datetime) AS bad_duration
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
-\"\"\").show()
+duckdb -c "
+SELECT
+  count(*) FILTER (WHERE fare_amount < 0) AS neg_fare,
+  count(*) FILTER (WHERE trip_distance = 0) AS zero_mi,
+  count(*) FILTER (WHERE passenger_count IS NULL) AS null_pax,
+  count(*) FILTER (WHERE tpep_dropoff_datetime <= tpep_pickup_datetime) AS bad_duration
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
 "
 ```
 
-#### 读全部 12 个月（跨月分析）
+#### 9. 读全部 12 个月（跨月分析）
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT strftime(tpep_pickup_datetime, '%Y-%m') AS month,
-         count(*) AS trips,
-         round(sum(fare_amount), 0) AS fare
-  FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet')
-  GROUP BY 1 ORDER BY 1
-\"\"\").show()
+duckdb -c "
+SELECT strftime(tpep_pickup_datetime, '%Y-%m') AS month,
+       count(*) AS trips,
+       round(sum(fare_amount), 0) AS fare
+FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet')
+GROUP BY 1 ORDER BY 1
 "
 ```
 
-> 你注意到什么了吗？上面这个查询会出来 16 行，
+> 你注意到什么了吗？上面这个查询会出来 **16 行**，
 > 其中有 2007-12、2008-12、2009-01 的零星记录，
 > 还有 2024-12 的 21 条——这些就是"脏数据"。
 > 原始数据**不帮你过滤**，全给你看。
 
-#### 建成一个本地 DuckDB 仓库（后续查询超快）
+#### 10. 建成一个本地 DuckDB 仓库（后续查询超快）
 
 ```bash
-.venv/bin/python -c "
-import duckdb
-con = duckdb.connect('data/manual_warehouse.duckdb')
-con.execute(\"CREATE TABLE trips AS SELECT * FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet', union_by_name=true)\")
-con.execute(\"CREATE TABLE zones AS SELECT * FROM read_csv_auto('data/raw/taxi_zone_lookup.csv', header=true)\")
-print('rows =', con.execute('SELECT count(*) FROM trips').fetchone()[0])
-con.close()
+duckdb data/manual_warehouse.duckdb -c "
+CREATE TABLE trips AS
+SELECT * FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet', union_by_name=true);
+CREATE TABLE zones AS
+SELECT * FROM read_csv_auto('data/raw/taxi_zone_lookup.csv', header=true);
 "
+
 # 之后直接：
-.venv/bin/python -c "
-import duckdb
-con = duckdb.connect('data/manual_warehouse.duckdb')
-duckdb.sql('SELECT count(*) FROM trips').show()
-"
+duckdb data/manual_warehouse.duckdb -c "SELECT count(*) FROM trips"
 ```
 
 项目自己的仓库是 `data/warehouse.duckdb`（`make setup` 构建的），
@@ -186,29 +187,39 @@ duckdb.sql('SELECT count(*) FROM trips').show()
 
 ---
 
-### 路线 B：装个 duckdb CLI，更简洁
+### 路线 B：Python + DuckDB（可选，适合数据科学场景）
 
-如果你嫌上面的 `python -c` 太长，可以装 DuckDB 命令行工具，
-然后就可以直接写 SQL：
+如果你同时装了 Python，可以用 duckdb 库在 Jupyter 里分析：
 
 ```bash
-# 安装到项目的 .venv 里
-.venv/bin/pip install duckdb-cli
-
-# 验证
-.venv/bin/duckdb --version
-
-# 然后直接一行：
-.venv/bin/duckdb -c "SELECT count(*) FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')"
-
-.venv/bin/duckdb -c "
-  SELECT extract(hour FROM tpep_pickup_datetime) AS h, count(*) AS trips
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
-  GROUP BY 1 ORDER BY 1
-"
+pip install duckdb pandas
 ```
 
-CLI 模式适合临时探索、写长 SQL、或者配 `.sql` 文件。
+然后写脚本：
+
+```python
+import duckdb
+
+# 一次性注册（12 个文件）
+con = duckdb.connect()
+con.execute("""
+    CREATE TABLE trips AS
+    SELECT * FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet',
+                                union_by_name=true)
+""")
+con.execute("""
+    CREATE TABLE zones AS
+    SELECT * FROM read_csv_auto('data/raw/taxi_zone_lookup.csv', header=true)
+""")
+
+# 直接查
+print(con.execute("""
+    SELECT extract(hour FROM tpep_pickup_datetime) AS h,
+           count(*) AS trips
+    FROM trips
+    GROUP BY 1 ORDER BY 1
+""").fetchall())
+```
 
 ---
 

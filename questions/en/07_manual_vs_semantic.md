@@ -18,167 +18,167 @@ project-root/
 │   │   ├── ... (01–12, 12 files total)
 │   │   └── taxi_zone_lookup.csv              ← zone lookup table
 │   └── warehouse.duckdb                      ← built after `make setup`
-├── .venv/bin/python                          ← comes with duckdb
 └── ...
 ```
 
-If you already ran `make setup`, these files should exist.
-If not, start with:
+Start with `make setup` to download the data (~750 MB, a few minutes):
 
 ```bash
 make setup
 ```
 
-It downloads all 12 Parquet files + the zone table into `data/raw/`
-and builds `data/warehouse.duckdb`. This takes a few minutes
-(~750 MB total).
+---
+
+### Prerequisite: install DuckDB CLI (one-time)
+
+DuckDB ships a pre-compiled command-line binary. Four lines and you're done:
+
+```bash
+wget https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip
+unzip duckdb_cli-linux-amd64.zip
+chmod +x duckdb
+sudo mv duckdb /usr/local/bin/
+```
+
+Verify:
+
+```bash
+duckdb --version   # v1.5.5 (Variegata)
+```
+
+No Python, no pip, no virtualenv — **pure Shell, zero dependencies**.
 
 ---
 
-### Path A: one-liner Shell commands (recommended first)
+### Path A: pure Shell + DuckDB CLI (recommended first)
 
-**Prerequisite**: `make setup` done. DuckDB is already inside
-`.venv/bin/python` — nothing else to install.
+All queries run from the project root. Just `duckdb -c "SQL"`.
 
-#### Inspect Parquet schema
+#### 1. Inspect Parquet columns and types
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"SELECT name, type FROM parquet_schema('data/raw/yellow_tripdata_2025-01.parquet') WHERE name <> 'schema'\").show()
+duckdb -c "
+SELECT name, type
+FROM parquet_schema('data/raw/yellow_tripdata_2025-01.parquet')
+WHERE name <> 'schema'
+ORDER BY name
 "
 ```
 
-#### Row count
+#### 2. Row count
 
 ```bash
-.venv/bin/python -c "
-import duckdb; print(duckdb.sql(\"SELECT count(*) FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')\").fetchone()[0])
+duckdb -c "
+SELECT count(*) AS trips
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
 "
 ```
 
-#### Top 5 rows, key columns
+#### 3. Top 5 rows, key columns
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT tpep_pickup_datetime AS pickup,
-         trip_distance, fare_amount, tip_amount, total_amount,
-         payment_type, PULocationID, DOLocationID
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
-  LIMIT 5
-\"\"\").show()
+duckdb -c "
+SELECT tpep_pickup_datetime AS pickup,
+       trip_distance, fare_amount, tip_amount, total_amount,
+       payment_type, PULocationID, DOLocationID
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
+LIMIT 5
 "
 ```
 
-#### Basic summary (trips, fare, tip rate)
+#### 4. Basic summary (trips, fare, tip rate)
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT count(*) AS trips,
-         round(sum(fare_amount), 2) AS total_fare,
-         round(sum(tip_amount), 2) AS total_tips,
-         round(sum(tip_amount)/nullif(sum(fare_amount), 0), 4) AS tip_rate
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
-  WHERE trip_distance > 0 AND total_amount >= 0
-\"\"\").show()
+duckdb -c "
+SELECT
+  count(*) AS trips,
+  round(sum(fare_amount), 2) AS total_fare,
+  round(sum(tip_amount), 2) AS total_tips,
+  round(sum(tip_amount) / nullif(sum(fare_amount), 0), 4) AS tip_rate
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
+WHERE trip_distance > 0 AND total_amount >= 0
 "
 ```
 
-#### Trips by hour of day
+#### 5. Trips by hour of day
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT extract(hour FROM tpep_pickup_datetime) AS hour,
-         count(*) AS trips
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
-  GROUP BY 1 ORDER BY 1
-\"\"\").show()
+duckdb -c "
+SELECT extract(hour FROM tpep_pickup_datetime) AS hour,
+       count(*) AS trips
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
+GROUP BY 1 ORDER BY 1
 "
 ```
 
-#### By payment type
+#### 6. By payment type
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT payment_type,
-         count(*) AS trips,
-         round(avg(fare_amount), 2) AS avg_fare,
-         round(avg(tip_amount), 2) AS avg_tip
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
-  GROUP BY 1 ORDER BY 2 DESC
-\"\"\").show()
+duckdb -c "
+SELECT payment_type,
+       count(*) AS trips,
+       round(avg(fare_amount), 2) AS avg_fare,
+       round(avg(tip_amount), 2) AS avg_tip
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
+GROUP BY 1 ORDER BY 2 DESC
 "
 ```
 
-#### Join zone table — top pickup boroughs
+#### 7. Join zone table — top pickup boroughs
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT z.Borough AS pickup_borough,
-         count(*) AS trips,
-         round(sum(t.total_amount), 0) AS revenue
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet') t
-  LEFT JOIN read_csv_auto('data/raw/taxi_zone_lookup.csv', header=true) z
-    ON t.PULocationID = z.LocationID
-  GROUP BY 1 ORDER BY 2 DESC LIMIT 5
-\"\"\").show()
+duckdb -c "
+SELECT z.Borough AS pickup_borough,
+       count(*) AS trips,
+       round(sum(t.total_amount), 0) AS revenue
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet') t
+LEFT JOIN read_csv_auto('data/raw/taxi_zone_lookup.csv', header=true) z
+  ON t.PULocationID = z.LocationID
+GROUP BY 1 ORDER BY 2 DESC LIMIT 5
 "
 ```
 
-#### Data quality inspection
+#### 8. Data quality inspection
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT
-    count(*) FILTER (WHERE fare_amount < 0) AS neg_fare,
-    count(*) FILTER (WHERE trip_distance = 0) AS zero_mi,
-    count(*) FILTER (WHERE passenger_count IS NULL) AS null_pax,
-    count(*) FILTER (WHERE tpep_dropoff_datetime <= tpep_pickup_datetime) AS bad_duration
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
-\"\"\").show()
+duckdb -c "
+SELECT
+  count(*) FILTER (WHERE fare_amount < 0) AS neg_fare,
+  count(*) FILTER (WHERE trip_distance = 0) AS zero_mi,
+  count(*) FILTER (WHERE passenger_count IS NULL) AS null_pax,
+  count(*) FILTER (WHERE tpep_dropoff_datetime <= tpep_pickup_datetime) AS bad_duration
+FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
 "
 ```
 
-#### All 12 months at once (cross-month analysis)
+#### 9. All 12 months at once (cross-month analysis)
 
 ```bash
-.venv/bin/python -c "
-import duckdb; duckdb.sql(\"\"\"
-  SELECT strftime(tpep_pickup_datetime, '%Y-%m') AS month,
-         count(*) AS trips,
-         round(sum(fare_amount), 0) AS fare
-  FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet')
-  GROUP BY 1 ORDER BY 1
-\"\"\").show()
+duckdb -c "
+SELECT strftime(tpep_pickup_datetime, '%Y-%m') AS month,
+       count(*) AS trips,
+       round(sum(fare_amount), 0) AS fare
+FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet')
+GROUP BY 1 ORDER BY 1
 "
 ```
 
-> You will notice this query returns 16 rows, not 12. It picks up
+> You will notice this query returns **16 rows**, not 12. It picks up
 > stray records from 2007–2009 and 2024-12. The raw data hands
 > you everything — no filtering.
 
-#### Build a local DuckDB warehouse
+#### 10. Build a local DuckDB warehouse
 
 ```bash
-.venv/bin/python -c "
-import duckdb
-con = duckdb.connect('data/manual_warehouse.duckdb')
-con.execute(\"CREATE TABLE trips AS SELECT * FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet', union_by_name=true)\")
-con.execute(\"CREATE TABLE zones AS SELECT * FROM read_csv_auto('data/raw/taxi_zone_lookup.csv', header=true)\")
-print('rows =', con.execute('SELECT count(*) FROM trips').fetchone()[0])
-con.close()
+duckdb data/manual_warehouse.duckdb -c "
+CREATE TABLE trips AS
+SELECT * FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet', union_by_name=true);
+CREATE TABLE zones AS
+SELECT * FROM read_csv_auto('data/raw/taxi_zone_lookup.csv', header=true);
 "
+
 # Then:
-.venv/bin/python -c "
-import duckdb
-con = duckdb.connect('data/manual_warehouse.duckdb')
-duckdb.sql('SELECT count(*) FROM trips').show()
-"
+duckdb data/manual_warehouse.duckdb -c "SELECT count(*) FROM trips"
 ```
 
 The project's own warehouse is `data/warehouse.duckdb` (built by
@@ -187,25 +187,37 @@ no conflicts.
 
 ---
 
-### Path B: install duckdb CLI for cleaner syntax
+### Path B: Python + DuckDB (optional, for data-science workflows)
 
-If the `python -c` one-liners feel too verbose, install the
-DuckDB CLI:
+If you also have Python around, use the duckdb library inside Jupyter:
 
 ```bash
-.venv/bin/pip install duckdb-cli
-.venv/bin/duckdb --version
-
-.venv/bin/duckdb -c "SELECT count(*) FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')"
-
-.venv/bin/duckdb -c "
-  SELECT extract(hour FROM tpep_pickup_datetime) AS h, count(*) AS trips
-  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
-  GROUP BY 1 ORDER BY 1
-"
+pip install duckdb pandas
 ```
 
-Great for ad-hoc exploration and longer SQL scripts.
+Then a short script:
+
+```python
+import duckdb
+
+con = duckdb.connect()
+con.execute("""
+    CREATE TABLE trips AS
+    SELECT * FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet',
+                                union_by_name=true)
+""")
+con.execute("""
+    CREATE TABLE zones AS
+    SELECT * FROM read_csv_auto('data/raw/taxi_zone_lookup.csv', header=true)
+""")
+
+print(con.execute("""
+    SELECT extract(hour FROM tpep_pickup_datetime) AS h,
+           count(*) AS trips
+    FROM trips
+    GROUP BY 1 ORDER BY 1
+""").fetchall())
+```
 
 ---
 

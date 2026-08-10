@@ -5,203 +5,207 @@
 > governance matters.
 > **Difficulty**: contrast (recommended after 01–03)
 
-## Background: query raw data from zero (two paths)
+## Background: query raw data from zero
 
-Below is a beginner-friendly hands-on guide. Work through it once and you'll
-immediately see why a semantic layer is useful.
+All commands below follow the project's own path conventions:
 
-### Prerequisites (both paths)
+```
+project-root/
+├── data/
+│   ├── raw/
+│   │   ├── yellow_tripdata_2025-01.parquet   ← monthly trip files
+│   │   ├── yellow_tripdata_2025-02.parquet
+│   │   ├── ... (01–12, 12 files total)
+│   │   └── taxi_zone_lookup.csv              ← zone lookup table
+│   └── warehouse.duckdb                      ← built after `make setup`
+├── .venv/bin/python                          ← comes with duckdb
+└── ...
+```
+
+If you already ran `make setup`, these files should exist.
+If not, start with:
 
 ```bash
-# 1) Make a folder for the data
-mkdir -p ~/nyc_taxi && cd ~/nyc_taxi
-
-# 2) Download the zone lookup (do once)
-curl -fsSL --retry 5 --progress-bar \
-  "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv" \
-  -o taxi_zone_lookup.csv
-
-# 3) Download 2025-01 trip data (~57 MB)
-curl -fsSL --retry 5 --progress-bar \
-  "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2025-01.parquet" \
-  -o yellow_tripdata_2025-01.parquet
+make setup
 ```
+
+It downloads all 12 Parquet files + the zone table into `data/raw/`
+and builds `data/warehouse.duckdb`. This takes a few minutes
+(~750 MB total).
 
 ---
 
-### Path A: pure Shell (zero Python, try this first)
+### Path A: one-liner Shell commands (recommended first)
 
-You only need **one tool**: `duckdb`, a single self-contained CLI binary.
+**Prerequisite**: `make setup` done. DuckDB is already inside
+`.venv/bin/python` — nothing else to install.
 
-```bash
-# Install duckdb CLI (Mac users can also brew install duckdb)
-pip install duckdb-cli
-
-# Verify
-duckdb --version
-```
-
-Every query is a **single-line shell command**. Examples from easy to hard:
-
-#### 1. Inspect Parquet schema
+#### Inspect Parquet schema
 
 ```bash
-duckdb -c "SELECT name, type FROM parquet_schema('yellow_tripdata_2025-01.parquet') WHERE name <> 'schema'"
-```
-
-#### 2. Row count
-
-```bash
-duckdb -c "SELECT count(*) FROM read_parquet('yellow_tripdata_2025-01.parquet')"
-```
-
-#### 3. Top 5 rows, key columns
-
-```bash
-duckdb -c "
-  SELECT tpep_pickup_datetime AS pickup,
-         trip_distance, fare_amount, tip_amount, total_amount,
-         payment_type, PULocationID, DOLocationID
-  FROM read_parquet('yellow_tripdata_2025-01.parquet')
-  LIMIT 5
+.venv/bin/python -c "
+import duckdb; duckdb.sql(\"SELECT name, type FROM parquet_schema('data/raw/yellow_tripdata_2025-01.parquet') WHERE name <> 'schema'\").show()
 "
 ```
 
-#### 4. Basic summary (trips, fare, tip rate)
+#### Row count
 
 ```bash
-duckdb -c "
+.venv/bin/python -c "
+import duckdb; print(duckdb.sql(\"SELECT count(*) FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')\").fetchone()[0])
+"
+```
+
+#### Top 5 rows, key columns
+
+```bash
+.venv/bin/python -c "
+import duckdb; duckdb.sql(\"\"\"
+  SELECT tpep_pickup_datetime AS pickup,
+         trip_distance, fare_amount, tip_amount, total_amount,
+         payment_type, PULocationID, DOLocationID
+  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
+  LIMIT 5
+\"\"\").show()
+"
+```
+
+#### Basic summary (trips, fare, tip rate)
+
+```bash
+.venv/bin/python -c "
+import duckdb; duckdb.sql(\"\"\"
   SELECT count(*) AS trips,
          round(sum(fare_amount), 2) AS total_fare,
          round(sum(tip_amount), 2) AS total_tips,
          round(sum(tip_amount)/nullif(sum(fare_amount), 0), 4) AS tip_rate
-  FROM read_parquet('yellow_tripdata_2025-01.parquet')
+  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
   WHERE trip_distance > 0 AND total_amount >= 0
+\"\"\").show()
 "
 ```
 
-#### 5. Trips by hour of day
+#### Trips by hour of day
 
 ```bash
-duckdb -c "
+.venv/bin/python -c "
+import duckdb; duckdb.sql(\"\"\"
   SELECT extract(hour FROM tpep_pickup_datetime) AS hour,
          count(*) AS trips
-  FROM read_parquet('yellow_tripdata_2025-01.parquet')
+  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
   GROUP BY 1 ORDER BY 1
+\"\"\").show()
 "
 ```
 
-#### 6. By payment type
+#### By payment type
 
 ```bash
-duckdb -c "
+.venv/bin/python -c "
+import duckdb; duckdb.sql(\"\"\"
   SELECT payment_type,
          count(*) AS trips,
          round(avg(fare_amount), 2) AS avg_fare,
          round(avg(tip_amount), 2) AS avg_tip
-  FROM read_parquet('yellow_tripdata_2025-01.parquet')
+  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
   GROUP BY 1 ORDER BY 2 DESC
+\"\"\").show()
 "
 ```
 
-#### 7. Join zone table — top pickup boroughs
+#### Join zone table — top pickup boroughs
 
 ```bash
-duckdb -c "
+.venv/bin/python -c "
+import duckdb; duckdb.sql(\"\"\"
   SELECT z.Borough AS pickup_borough,
          count(*) AS trips,
          round(sum(t.total_amount), 0) AS revenue
-  FROM read_parquet('yellow_tripdata_2025-01.parquet') t
-  LEFT JOIN read_csv_auto('taxi_zone_lookup.csv', header=true) z
+  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet') t
+  LEFT JOIN read_csv_auto('data/raw/taxi_zone_lookup.csv', header=true) z
     ON t.PULocationID = z.LocationID
   GROUP BY 1 ORDER BY 2 DESC LIMIT 5
+\"\"\").show()
 "
 ```
 
-#### 8. Data quality inspection
+#### Data quality inspection
 
 ```bash
-duckdb -c "
+.venv/bin/python -c "
+import duckdb; duckdb.sql(\"\"\"
   SELECT
     count(*) FILTER (WHERE fare_amount < 0) AS neg_fare,
     count(*) FILTER (WHERE trip_distance = 0) AS zero_mi,
     count(*) FILTER (WHERE passenger_count IS NULL) AS null_pax,
     count(*) FILTER (WHERE tpep_dropoff_datetime <= tpep_pickup_datetime) AS bad_duration
-  FROM read_parquet('yellow_tripdata_2025-01.parquet')
+  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
+\"\"\").show()
 "
 ```
 
-#### 9. All 12 months at once (cross-month analysis)
-
-DuckDB natively supports glob — one pattern, all files:
+#### All 12 months at once (cross-month analysis)
 
 ```bash
-duckdb -c "
+.venv/bin/python -c "
+import duckdb; duckdb.sql(\"\"\"
   SELECT strftime(tpep_pickup_datetime, '%Y-%m') AS month,
          count(*) AS trips,
          round(sum(fare_amount), 0) AS fare
-  FROM read_parquet('yellow_tripdata_2025-*.parquet')
+  FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet')
+  GROUP BY 1 ORDER BY 1
+\"\"\").show()
+"
+```
+
+> You will notice this query returns 16 rows, not 12. It picks up
+> stray records from 2007–2009 and 2024-12. The raw data hands
+> you everything — no filtering.
+
+#### Build a local DuckDB warehouse
+
+```bash
+.venv/bin/python -c "
+import duckdb
+con = duckdb.connect('data/manual_warehouse.duckdb')
+con.execute(\"CREATE TABLE trips AS SELECT * FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet', union_by_name=true)\")
+con.execute(\"CREATE TABLE zones AS SELECT * FROM read_csv_auto('data/raw/taxi_zone_lookup.csv', header=true)\")
+print('rows =', con.execute('SELECT count(*) FROM trips').fetchone()[0])
+con.close()
+"
+# Then:
+.venv/bin/python -c "
+import duckdb
+con = duckdb.connect('data/manual_warehouse.duckdb')
+duckdb.sql('SELECT count(*) FROM trips').show()
+"
+```
+
+The project's own warehouse is `data/warehouse.duckdb` (built by
+`make setup`). Yours lives in `data/manual_warehouse.duckdb` —
+no conflicts.
+
+---
+
+### Path B: install duckdb CLI for cleaner syntax
+
+If the `python -c` one-liners feel too verbose, install the
+DuckDB CLI:
+
+```bash
+.venv/bin/pip install duckdb-cli
+.venv/bin/duckdb --version
+
+.venv/bin/duckdb -c "SELECT count(*) FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')"
+
+.venv/bin/duckdb -c "
+  SELECT extract(hour FROM tpep_pickup_datetime) AS h, count(*) AS trips
+  FROM read_parquet('data/raw/yellow_tripdata_2025-01.parquet')
   GROUP BY 1 ORDER BY 1
 "
 ```
 
-#### 10. Build a local DuckDB warehouse
-
-```bash
-duckdb warehouse.duckdb <<'SQL'
-CREATE TABLE trips AS SELECT * FROM read_parquet('yellow_tripdata_2025-*.parquet', union_by_name=true);
-CREATE TABLE zones AS SELECT * FROM read_csv_auto('taxi_zone_lookup.csv', header=true);
-SQL
-# After that:
-duckdb warehouse.duckdb -c "SELECT count(*) FROM trips"
-```
-
----
-
-### Path B: Python + Pandas/DuckDB
-
-For those who already have Python installed.
-
-```bash
-pip install duckdb pandas
-```
-
-Script example (`manual_query.py`):
-
-```python
-import duckdb
-
-con = duckdb.connect()
-con.execute("CREATE TABLE trips AS SELECT * FROM read_parquet('yellow_tripdata_2025-01.parquet')")
-con.execute("CREATE TABLE zones AS SELECT * FROM read_csv_auto('taxi_zone_lookup.csv', header=true)")
-
-print(con.execute("""
-    SELECT count(*) AS trips,
-           round(sum(fare_amount), 2) AS fare_usd,
-           round(sum(tip_amount)/nullif(sum(fare_amount),0), 4) AS tip_rate
-    FROM trips
-    WHERE trip_distance > 0 AND total_amount >= 0
-""").fetchdf())
-
-print(con.execute("""
-    SELECT extract(hour FROM tpep_pickup_datetime) AS h,
-           count(*) AS trips
-    FROM trips GROUP BY 1 ORDER BY 1
-""").fetchdf())
-
-print(con.execute("""
-    SELECT payment_type,
-           count(*) AS trips,
-           round(sum(tip_amount)/nullif(sum(fare_amount),0), 4) AS tip_rate
-    FROM trips WHERE fare_amount > 0 GROUP BY 1 ORDER BY 2 DESC
-""").fetchdf())
-```
-
-Run with:
-
-```bash
-python3 manual_query.py
-```
+Great for ad-hoc exploration and longer SQL scripts.
 
 ---
 
@@ -210,11 +214,12 @@ python3 manual_query.py
 After running through the steps above you will likely notice:
 
 1. **Every query needs its own WHERE clause** — filter zero-distance?
-   Negative fare? Forgetting one gives inconsistent numbers.
+   Negative fare? Stray records from 2007? Forgetting one gives
+   inconsistent numbers.
 
-2. **TLC code numbers are opaque** — `payment_type = 1` means what?
-   `RatecodeID = 2`? You either memorize the data dictionary or write
-   CASE WHEN in every SQL.
+2. **TLC code numbers are opaque** — `payment_type = 1` is credit card,
+   `payment_type = 2` is cash, `RatecodeID = 2` is JFK. Either
+   memorize the data dictionary or write CASE WHEN in every SQL.
 
 3. **Tip rate is trivially wrong if you forget payment-type filtering** —
    cash trips record zero tip, so a naive `sum(tip_amount)/sum(fare_amount)`
@@ -227,8 +232,9 @@ After running through the steps above you will likely notice:
 5. **Double JOINs for pickup and dropoff** — easy to mis-write or forget
    the ON condition, producing a Cartesian product silently.
 
-6. **`union_by_name` matters across months** — if one file gains a new column
-   later, plain `UNION ALL` breaks.
+6. **Glob pattern needs care** — `read_parquet('data/raw/*.parquet')`
+   grabs `.part` temp files too. Use the exact
+   `yellow_tripdata_2025-*.parquet` pattern.
 
 7. **CBD congestion fee has a start date** — before Jan 5, 2025, zeros are
    normal, not non-compliance.
@@ -239,9 +245,9 @@ After running through the steps above you will likely notice:
 
 ## Question to ask the Agent
 
-Suppose you just ran the raw-query guide above. Compare two ways of answering
-the same question — *"What is the tip rate among credit-card trips in January
-2025, broken down by day of week?"* — using:
+Suppose you just ran the raw-query guide above. Compare two ways of
+answering the same question — *"What is the tip rate among credit-card
+trips in January 2025, broken down by day of week?"* — using:
 
 1. **Raw Parquet + duckdb SQL** (which you just did)
 2. **Marivo semantic layer** (`import marivo.semantic as ms`)
@@ -254,7 +260,7 @@ Compare along these dimensions:
 - Where is it easy to get the numbers wrong in raw SQL
   (cash vs credit, metered fare vs total charged, plausible vs all records)?
 - How does each approach handle data quality issues
-  (negative fares, zero distance, null `passenger_count`)?
+  (negative fares, zero distance, null `passenger_count`, stray 2007 records)?
 - If the analysis scope expands from January to all 12 months,
   what changes in each approach?
 
@@ -270,3 +276,7 @@ and when does a semantic layer save real time?**
   consistent numbers, or when the same analysis pattern repeats.
 - After you've run the raw queries, time yourself — then ask the Agent
   the same question through the semantic layer and feel the difference.
+- Try deliberately **skipping all WHERE filters** on the full-year glob
+  query. Notice that "44.47 million trips, ~$9.2B fare" includes a single
+  $17 trip from 2007 and a single $70 trip from 2008 — does that change
+  your conclusion? Probably not, but you should know they are there.

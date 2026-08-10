@@ -292,3 +292,136 @@ and when does a semantic layer save real time?**
   query. Notice that "44.47 million trips, ~$9.2B fare" includes a single
   $17 trip from 2007 and a single $70 trip from 2008 — does that change
   your conclusion? Probably not, but you should know they are there.
+
+---
+
+## Appendix: the DuckDB warehouse built by `make setup`
+
+In addition to downloading raw Parquet files into `data/raw/`,
+`make setup` also builds a local DuckDB warehouse at
+`data/warehouse.duckdb` (~1.3 MB).
+
+The warehouse combines the 12 monthly Parquet files + the zone lookup
+table, and derives 30+ convenience columns on top of the raw fields.
+**Raw data files are never modified** — everything lives as views and
+dimension tables inside DuckDB.
+
+### Inspect what's in the warehouse
+
+```bash
+duckdb data/warehouse.duckdb -c "
+SELECT table_name, table_type
+FROM information_schema.tables
+WHERE table_schema = 'main'
+ORDER BY table_type, table_name
+"
+```
+
+### The 5 objects, at a glance
+
+| Object | Type | Description |
+|--------|------|-------------|
+| `yellow_trips` | **VIEW** | The core: one row per TLC trip record, with 30+ derived convenience columns on top of raw fields |
+| `pickup_zones` | TABLE | Taxi Zone lookup, **pickup-role** version (265 zones) |
+| `dropoff_zones` | TABLE | Same zone table, **dropoff-role** copy (identical columns, kept separate so you can JOIN without aliasing) |
+| `source_months` | TABLE | Row count, min/max pickup time per source month (12 rows) |
+| `warehouse_metadata` | TABLE | Warehouse version, build timestamp, data provenance |
+
+### The 49 columns of `yellow_trips`, grouped
+
+**Time & duration (9 columns)**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `source_month` | VARCHAR | Source file month (`2025-01` … `2025-12`) |
+| `picked_up_at` | TIMESTAMP | Pickup time (America/New_York) |
+| `dropped_off_at` | TIMESTAMP | Dropoff time |
+| `trip_duration_minutes` | DOUBLE | Duration in minutes |
+| `trip_duration_hours` | DOUBLE | Duration in hours |
+| `pickup_hour` | BIGINT | Pickup hour 0–23 |
+| `pickup_weekday_number` | BIGINT | ISO weekday (1=Monday … 7=Sunday) |
+| `pickup_weekday` | VARCHAR | Weekday name (`Monday` … `Sunday`) |
+| `pickup_is_weekend` | BOOLEAN | Whether the trip started on Saturday or Sunday |
+
+**Trip attributes (8 columns)**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `vendor_id` / `vendor` | BIGINT / VARCHAR | TPEP vendor code + translated name |
+| `passenger_count` | DOUBLE | Number of passengers (driver-entered, can be null) |
+| `trip_distance_miles` | DOUBLE | Trip distance in miles |
+| `rate_code_id` / `rate_code` | BIGINT / VARCHAR | Rate code + translation (`Standard` / `JFK` / `Newark` …) |
+| `store_and_forward` | VARCHAR | Whether the trip was "stored and forwarded" |
+
+**Zone (6 columns, two roles each)**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `pickup_location_id` / `dropoff_location_id` | BIGINT | Pickup / dropoff zone ID |
+| `pickup_borough` / `dropoff_borough` | VARCHAR | Borough (Manhattan / Queens / Brooklyn / Bronx / Staten Island / EWR / Unknown) |
+| `pickup_zone` / `dropoff_zone` | VARCHAR | Zone name (e.g. `Midtown East`) |
+| `pickup_service_zone` / `dropoff_service_zone` | VARCHAR | Service zone category (`Yellow Zone` / `Boro Zone` / `EWR`) |
+
+**Payment (2 columns)**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `payment_type_id` | BIGINT | Payment-type code |
+| `payment_type` | VARCHAR | Translation: `Credit card` / `Cash` / `No charge` / `Dispute` / `Unknown` |
+
+**Amounts (10 columns, all with `_usd` suffix)**
+
+| Column | Description |
+|--------|-------------|
+| `fare_amount_usd` | Metered fare |
+| `extra_amount_usd` | Extra surcharge |
+| `mta_tax_usd` | MTA tax |
+| `tip_amount_usd` | Tip (mostly credit-card tips; cash tips are not recorded) |
+| `tolls_amount_usd` | Tolls |
+| `improvement_surcharge_usd` | TLC improvement surcharge |
+| `total_amount_usd` | Total charged to passenger (excludes cash tips) |
+| `congestion_surcharge_usd` | NY state congestion surcharge |
+| `airport_fee_usd` | Airport fee |
+| `cbd_congestion_fee_usd` | CBD congestion fee (effective Jan 5, 2025) |
+
+**Data-quality flags (12 columns, all BOOLEAN)**
+
+| Column | Check |
+|--------|-------|
+| `pickup_time_matches_source_month` | Pickup month matches the source file's month |
+| `has_positive_duration` | Duration > 0 |
+| `has_nonnegative_distance` | Distance ≥ 0 |
+| `has_positive_distance` | Distance > 0 |
+| `has_reasonable_distance` | Distance between 0 and 200 miles |
+| `has_reasonable_duration` | Duration between 0 and 24 hours |
+| `has_reasonable_speed` | Implied speed ≤ 100 mph |
+| `has_nonnegative_fare` | Fare ≥ 0 |
+| `has_nonnegative_total` | Total charged ≥ 0 |
+| `has_known_passenger_count` | Passenger count is not null |
+| `has_valid_pickup_zone` | Pickup zone ID resolves to the official lookup |
+| `has_valid_dropoff_zone` | Dropoff zone ID resolves to the official lookup |
+| **`is_plausible_record`** | **Composite "reasonable record" flag combining all of the above** |
+
+### A few queries to try
+
+```bash
+# Inspect the schema
+duckdb data/warehouse.duckdb -c "DESCRIBE yellow_trips"
+
+# Plausible vs implausible share
+duckdb data/warehouse.duckdb -c "
+SELECT
+  is_plausible_record,
+  count(*) AS trips
+FROM yellow_trips
+GROUP BY 1
+ORDER BY 1 DESC
+"
+
+# Raw Parquet row count vs warehouse view — should match exactly
+duckdb -c "
+SELECT 'raw' AS source, count(*) FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet')
+UNION ALL
+SELECT 'warehouse', count(*) FROM yellow_trips
+"
+```

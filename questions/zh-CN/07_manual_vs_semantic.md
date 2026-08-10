@@ -290,3 +290,135 @@ print(con.execute("""
   你得到的那个"全年总共 4447 万条、车费约 92 亿美元"的数字，
   里面混了 2007 年的一条 17 美元记录和 2008 年的一条 70 美元记录——
   对你的结论有影响吗？（答案是：看情况，但你得先**知道它们存在**。）
+
+---
+
+## 附录：`make setup` 构建的 DuckDB 仓库
+
+`make setup` 除了下载原始文件到 `data/raw/`，还会自动构建一个
+**本地 DuckDB 仓库**：`data/warehouse.duckdb`（约 1.3 MB）。
+
+这个仓库把 12 个 Parquet 文件 + 区域表整合在了一起，
+并在原始字段之上派生了大量便捷字段。**不修改原始数据文件**，
+只是在 DuckDB 里建了一个视图和几张维表。
+
+### 查看仓库里有什么
+
+```bash
+duckdb data/warehouse.duckdb -c "
+SELECT table_name, table_type
+FROM information_schema.tables
+WHERE table_schema = 'main'
+ORDER BY table_type, table_name
+"
+```
+
+### 5 个库对象一览
+
+| 对象 | 类型 | 说明 |
+|------|------|------|
+| `yellow_trips` | **视图（VIEW）** | 核心：一行 = 一条官方发布的行程，在原始字段上派生了 30+ 个便捷列 |
+| `pickup_zones` | 表 | Taxi Zone 区域表，**上车角色**的 265 个区域 |
+| `dropoff_zones` | 表 | 同样的区域表，**下车角色**版本（字段相同，独立一份方便 JOIN） |
+| `source_months` | 表 | 每月的行数、最早/最晚上车时间（12 行） |
+| `warehouse_metadata` | 表 | 仓库版本、构建时间、数据来源等元信息 |
+
+### `yellow_trips` 视图的 49 列分组
+
+**时间 & 时长（9 列）**
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| `source_month` | VARCHAR | 来源文件月份（`2025-01` … `2025-12`） |
+| `picked_up_at` | TIMESTAMP | 上车时间（America/New_York） |
+| `dropped_off_at` | TIMESTAMP | 下车时间 |
+| `trip_duration_minutes` | DOUBLE | 行程时长（分钟） |
+| `trip_duration_hours` | DOUBLE | 行程时长（小时） |
+| `pickup_hour` | BIGINT | 上车小时 0–23 |
+| `pickup_weekday_number` | BIGINT | ISO 星期（1=周一 … 7=周日） |
+| `pickup_weekday` | VARCHAR | 星期名称（`Monday` … `Sunday`） |
+| `pickup_is_weekend` | BOOLEAN | 是否周末 |
+
+**行程属性（8 列）**
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| `vendor_id` / `vendor` | BIGINT / VARCHAR | TPEP 服务商编码 + 翻译名 |
+| `passenger_count` | DOUBLE | 乘客数（可为空） |
+| `trip_distance_miles` | DOUBLE | 里程（英里） |
+| `rate_code_id` / `rate_code` | BIGINT / VARCHAR | 费率编码 + 翻译（`Standard` / `JFK` / `Newark` …） |
+| `store_and_forward` | VARCHAR | 是否先存后发 |
+
+**区域（6 列，上车 + 下车各一套）**
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| `pickup_location_id` / `dropoff_location_id` | BIGINT | 上车 / 下车区域 ID |
+| `pickup_borough` / `dropoff_borough` | VARCHAR | 行政区（Manhattan / Queens / Brooklyn / Bronx / Staten Island / EWR / Unknown） |
+| `pickup_zone` / `dropoff_zone` | VARCHAR | 区域名称（如 `Midtown East`） |
+| `pickup_service_zone` / `dropoff_service_zone` | VARCHAR | 服务区分类（`Yellow Zone` / `Boro Zone` / `EWR`） |
+
+**支付（2 列）**
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| `payment_type_id` | BIGINT | 支付方式编码 |
+| `payment_type` | VARCHAR | 翻译：`Credit card` / `Cash` / `No charge` / `Dispute` / `Unknown` |
+
+**金额（10 列，统一加 `_usd` 后缀）**
+
+| 列名 | 说明 |
+|------|------|
+| `fare_amount_usd` | 计价器车费 |
+| `extra_amount_usd` | 附加费 |
+| `mta_tax_usd` | MTA 税 |
+| `tip_amount_usd` | 小费（基本只有信用卡小费，现金小费不在内） |
+| `tolls_amount_usd` | 过路费 |
+| `improvement_surcharge_usd` | TLC 改善附加费 |
+| `total_amount_usd` | 乘客支付总额（不含现金小费） |
+| `congestion_surcharge_usd` | 纽约州拥堵附加费 |
+| `airport_fee_usd` | 机场费 |
+| `cbd_congestion_fee_usd` | CBD 拥堵费（2025-01-05 起生效） |
+
+**数据质量标记（12 列，全部是 BOOLEAN）**
+
+| 列名 | 检查内容 |
+|------|----------|
+| `pickup_time_matches_source_month` | 上车月份是否与源文件月份一致 |
+| `has_positive_duration` | 时长 > 0 |
+| `has_nonnegative_distance` | 里程 ≥ 0 |
+| `has_positive_distance` | 里程 > 0 |
+| `has_reasonable_distance` | 里程在 0–200 英里 |
+| `has_reasonable_duration` | 时长在 0–24 小时 |
+| `has_reasonable_speed` | 推算速度 ≤ 100 mph |
+| `has_nonnegative_fare` | 车费 ≥ 0 |
+| `has_nonnegative_total` | 支付总额 ≥ 0 |
+| `has_known_passenger_count` | 乘客数不为空 |
+| `has_valid_pickup_zone` | 上车区域 ID 在官方对照表中 |
+| `has_valid_dropoff_zone` | 下车区域 ID 在官方对照表中 |
+| **`is_plausible_record`** | **综合上面所有条件的"合理记录"标记** |
+
+### 查看示例
+
+```bash
+# 看看 yellow_trips 的结构
+duckdb data/warehouse.duckdb -c "DESCRIBE yellow_trips"
+
+# 看看合理记录占比
+duckdb data/warehouse.duckdb -c "
+SELECT
+  is_plausible_record,
+  count(*) AS trips
+FROM yellow_trips
+GROUP BY 1
+ORDER BY 1 DESC
+"
+
+# 对比一下：原始 Parquet vs 仓库视图
+duckdb -c "
+SELECT count(*) AS raw_rows FROM read_parquet('data/raw/yellow_tripdata_2025-*.parquet')
+UNION ALL
+SELECT count(*) FROM yellow_trips
+"
+# 结果应该一致——仓库视图不增不减，只是加了便捷列
+```
